@@ -1,22 +1,8 @@
 /*
- *
  * Copyright (C) 2017-2021 Maxime Schmitt <maxime.schmitt91@gmail.com>
  *
  * This file is part of Nvtop.
- *
- * Nvtop is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Nvtop is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with nvtop.  If not, see <http://www.gnu.org/licenses/>.
- *
+ * License: GPLv3
  */
 
 #include "nvtop/extract_gpuinfo.h"
@@ -34,9 +20,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-
+#include <unistd.h>      // Added for sleep
 #include <locale.h>
+
+// Added for manual GPU field validation
+#include "nvtop/extract_gpuinfo_common.h"
 
 static volatile sig_atomic_t signal_exit = 0;
 static volatile sig_atomic_t signal_resize_win = 0;
@@ -58,41 +46,41 @@ static void cont_handler(int signum) {
 }
 
 static const char helpstring[] = "Available options:\n"
-                                 "  -d --delay        : Select the refresh rate (1 == 0.1s)\n"
-                                 "  -v --version      : Print the version and exit\n"
-                                 "  -c --config-file  : Provide a custom config file location to load/save "
-                                 "preferences\n"
-                                 "  -p --no-plot      : Disable bar plot\n"
-                                 "  -P --no-processes : Disable process list\n"
-                                 "  -r --reverse-abs  : Reverse abscissa: plot the recent data left and "
-                                 "older on the right\n"
-                                 "  -C --no-color     : No colors\n"
-                                 "line information\n"
-                                 "  -f --freedom-unit : Use fahrenheit\n"
-                                 "  -i --gpu-info     : Show bar with additional GPU parametres\n"
-                                 "  -E --encode-hide  : Set encode/decode auto hide time in seconds "
-                                 "(default 30s, negative = always on screen)\n"
-                                 "  -h --help         : Print help and exit\n"
-                                 "  -s --snapshot     : Output the current gpu stats without ncurses"
-                                 "(useful for scripting)\n";
+"  -d --delay        : Select the refresh rate (1 == 0.1s)\n"
+"  -v --version      : Print the version and exit\n"
+"  -c --config-file  : Provide a custom config file location to load/save "
+"preferences\n"
+"  -p --no-plot      : Disable bar plot\n"
+"  -P --no-processes : Disable process list\n"
+"  -r --reverse-abs  : Reverse abscissa: plot the recent data left and "
+"older on the right\n"
+"  -C --no-color     : No colors\n"
+"line information\n"
+"  -f --freedom-unit : Use fahrenheit\n"
+"  -i --gpu-info     : Show bar with additional GPU parametres\n"
+"  -E --encode-hide  : Set encode/decode auto hide time in seconds "
+"(default 30s, negative = always on screen)\n"
+"  -h --help         : Print help and exit\n"
+"  -s --snapshot     : Output the current gpu stats without ncurses"
+"(useful for scripting)\n";
 
 static const char versionString[] = "nvtop version " NVTOP_VERSION_STRING;
 
 static const struct option long_opts[] = {
-    {.name = "delay", .has_arg = required_argument, .flag = NULL, .val = 'd'},
-    {.name = "version", .has_arg = no_argument, .flag = NULL, .val = 'v'},
-    {.name = "help", .has_arg = no_argument, .flag = NULL, .val = 'h'},
-    {.name = "config-file", .has_arg = required_argument, .flag = NULL, .val = 'c'},
-    {.name = "no-color", .has_arg = no_argument, .flag = NULL, .val = 'C'},
-    {.name = "no-colour", .has_arg = no_argument, .flag = NULL, .val = 'C'},
-    {.name = "freedom-unit", .has_arg = no_argument, .flag = NULL, .val = 'f'},
-    {.name = "gpu-info", .has_arg = no_argument, .flag = NULL, .val = 'i'},
-    {.name = "encode-hide", .has_arg = required_argument, .flag = NULL, .val = 'E'},
-    {.name = "no-plot", .has_arg = no_argument, .flag = NULL, .val = 'p'},
-    {.name = "no-processes", .has_arg = no_argument, .flag = NULL, .val = 'P'},
-    {.name = "reverse-abs", .has_arg = no_argument, .flag = NULL, .val = 'r'},
-    {.name = "snapshot", .has_arg = no_argument, .flag = NULL, .val = 's'},
-    {0, 0, 0, 0},
+  {.name = "delay", .has_arg = required_argument, .flag = NULL, .val = 'd'},
+  {.name = "version", .has_arg = no_argument, .flag = NULL, .val = 'v'},
+  {.name = "help", .has_arg = no_argument, .flag = NULL, .val = 'h'},
+  {.name = "config-file", .has_arg = required_argument, .flag = NULL, .val = 'c'},
+  {.name = "no-color", .has_arg = no_argument, .flag = NULL, .val = 'C'},
+  {.name = "no-colour", .has_arg = no_argument, .flag = NULL, .val = 'C'},
+  {.name = "freedom-unit", .has_arg = no_argument, .flag = NULL, .val = 'f'},
+  {.name = "gpu-info", .has_arg = no_argument, .flag = NULL, .val = 'i'},
+  {.name = "encode-hide", .has_arg = required_argument, .flag = NULL, .val = 'E'},
+  {.name = "no-plot", .has_arg = no_argument, .flag = NULL, .val = 'p'},
+  {.name = "no-processes", .has_arg = no_argument, .flag = NULL, .val = 'P'},
+  {.name = "reverse-abs", .has_arg = no_argument, .flag = NULL, .val = 'r'},
+  {.name = "snapshot", .has_arg = no_argument, .flag = NULL, .val = 's'},
+  {0, 0, 0, 0},
 };
 
 static const char opts[] = "hvd:c:CfE:pPris";
@@ -118,75 +106,75 @@ int main(int argc, char **argv) {
     if (optchar == -1)
       break;
     switch (optchar) {
-    case 'd': {
-      char *endptr = NULL;
-      long int delay_val = strtol(optarg, &endptr, 0);
-      if (endptr == optarg) {
-        fprintf(stderr, "Error: The delay must be a positive value "
-                        "representing tenths of seconds\n");
-        exit(EXIT_FAILURE);
-      }
-      if (delay_val < 0) {
-        fprintf(stderr, "Error: A negative delay requires a time machine!\n");
-        exit(EXIT_FAILURE);
-      }
-      update_interval_option_set = true;
-      update_interval_option = (int)delay_val * 100u;
-      if (update_interval_option > 99900)
-        update_interval_option = 99900;
-      if (update_interval_option < 100)
-        update_interval_option = 100;
-    } break;
-    case 'v':
-      printf("%s\n", versionString);
-      exit(EXIT_SUCCESS);
-    case 'h':
-      printf("%s\n%s", versionString, helpstring);
-      exit(EXIT_SUCCESS);
-    case 'c':
-      custom_config_file_path = optarg;
-      break;
-    case 'C':
-      no_color_option = true;
-      break;
-    case 'f':
-      use_fahrenheit_option = true;
-      break;
-    case 'i':
-      show_gpu_info_bar = true;
-      break;
-    case 'E': {
-      if (sscanf(optarg, "%lf", &encode_decode_hide_time) == EOF) {
-        fprintf(stderr, "Invalid format for encode/decode hide time: %s\n", optarg);
-        exit(EXIT_FAILURE);
-      }
-      encode_decode_timer_option_set = true;
-    } break;
-    case 'p':
-      hide_plot_option = true;
-      break;
-    case 'P':
-      hide_processes_option = true;
-      break;
-    case 'r':
-      reverse_plot_direction_option = true;
-      break;
-    case 's':
-      show_snapshot = true;
-      break;
-    case ':':
-    case '?':
-      switch (optopt) {
-      case 'd':
-        fprintf(stderr, "Error: The delay option takes a positive value "
-                        "representing tenths of seconds\n");
+      case 'd': {
+        char *endptr = NULL;
+        long int delay_val = strtol(optarg, &endptr, 0);
+        if (endptr == optarg) {
+          fprintf(stderr, "Error: The delay must be a positive value "
+          "representing tenths of seconds\n");
+          exit(EXIT_FAILURE);
+        }
+        if (delay_val < 0) {
+          fprintf(stderr, "Error: A negative delay requires a time machine!\n");
+          exit(EXIT_FAILURE);
+        }
+        update_interval_option_set = true;
+        update_interval_option = (int)delay_val * 100u;
+        if (update_interval_option > 99900)
+          update_interval_option = 99900;
+        if (update_interval_option < 100)
+          update_interval_option = 100;
+      } break;
+      case 'v':
+        printf("%s\n", versionString);
+        exit(EXIT_SUCCESS);
+      case 'h':
+        printf("%s\n%s", versionString, helpstring);
+        exit(EXIT_SUCCESS);
+      case 'c':
+        custom_config_file_path = optarg;
         break;
-      default:
-        fprintf(stderr, "Unhandled error in getopt missing argument\n");
-        exit(EXIT_FAILURE);
+      case 'C':
+        no_color_option = true;
         break;
-      }
-      exit(EXIT_FAILURE);
+      case 'f':
+        use_fahrenheit_option = true;
+        break;
+      case 'i':
+        show_gpu_info_bar = true;
+        break;
+      case 'E': {
+        if (sscanf(optarg, "%lf", &encode_decode_hide_time) == EOF) {
+          fprintf(stderr, "Invalid format for encode/decode hide time: %s\n", optarg);
+          exit(EXIT_FAILURE);
+        }
+        encode_decode_timer_option_set = true;
+      } break;
+      case 'p':
+        hide_plot_option = true;
+        break;
+      case 'P':
+        hide_processes_option = true;
+        break;
+      case 'r':
+        reverse_plot_direction_option = true;
+        break;
+      case 's':
+        show_snapshot = true;
+        break;
+      case ':':
+      case '?':
+        switch (optopt) {
+          case 'd':
+            fprintf(stderr, "Error: The delay option takes a positive value "
+            "representing tenths of seconds\n");
+            break;
+          default:
+            fprintf(stderr, "Unhandled error in getopt missing argument\n");
+            exit(EXIT_FAILURE);
+            break;
+        }
+        exit(EXIT_FAILURE);
     }
   }
 
@@ -226,12 +214,6 @@ int main(int argc, char **argv) {
     return EXIT_SUCCESS;
   }
 
-  if (show_snapshot) {
-    print_snapshot(&monitoredGpus, use_fahrenheit_option);
-    gpuinfo_shutdown_info_extraction(&monitoredGpus);
-    return EXIT_SUCCESS;
-  }
-
   unsigned numWarningMessages = 0;
   const char **warningMessages;
   get_info_messages(&monitoredGpus, &numWarningMessages, &warningMessages);
@@ -240,19 +222,18 @@ int main(int argc, char **argv) {
   alloc_interface_options_internals(custom_config_file_path, allDevCount, &monitoredGpus, &allDevicesOptions);
   load_interface_options_from_config_file(allDevCount, &allDevicesOptions);
   for (unsigned i = 0; i < allDevCount; ++i) {
-    // Nothing specified in the file
     if (!plot_isset_draw_info(plot_information_count, allDevicesOptions.gpu_specific_opts[i].to_draw)) {
       allDevicesOptions.gpu_specific_opts[i].to_draw = plot_default_draw_info();
     } else {
       allDevicesOptions.gpu_specific_opts[i].to_draw =
-          plot_remove_draw_info(plot_information_count, allDevicesOptions.gpu_specific_opts[i].to_draw);
+      plot_remove_draw_info(plot_information_count, allDevicesOptions.gpu_specific_opts[i].to_draw);
     }
   }
   if (!process_is_field_displayed(process_field_count, allDevicesOptions.process_fields_displayed)) {
     allDevicesOptions.process_fields_displayed = process_default_displayed_field();
   } else {
     allDevicesOptions.process_fields_displayed =
-        process_remove_field_to_display(process_field_count, allDevicesOptions.process_fields_displayed);
+    process_remove_field_to_display(process_field_count, allDevicesOptions.process_fields_displayed);
   }
   if (no_color_option)
     allDevicesOptions.use_color = false;
@@ -277,7 +258,7 @@ int main(int argc, char **argv) {
 
   gpuinfo_populate_static_infos(&monitoredGpus);
   unsigned numMonitoredGpus =
-      interface_check_and_fix_monitored_gpus(allDevCount, &monitoredGpus, &nonMonitoredGpus, &allDevicesOptions);
+  interface_check_and_fix_monitored_gpus(allDevCount, &monitoredGpus, &nonMonitoredGpus, &allDevicesOptions);
 
   if (allDevicesOptions.show_startup_messages) {
     bool dont_show_again = show_information_messages(numWarningMessages, warningMessages);
@@ -287,8 +268,107 @@ int main(int argc, char **argv) {
     }
   }
 
+  // ====================================================================================
+  // CUSTOM FIX: Manual JSON Snapshot Printer
+  // ====================================================================================
+  if (show_snapshot) {
+    // 1. Warm-up Pass
+    gpuinfo_refresh_dynamic_info(&monitoredGpus);
+    gpuinfo_refresh_processes(&monitoredGpus);
+    usleep(250000);
+
+    // 2. Start Pass
+    gpuinfo_refresh_dynamic_info(&monitoredGpus);
+    gpuinfo_refresh_processes(&monitoredGpus);
+
+    // 3. Work Interval (1 Second)
+    usleep(1000000);
+
+    // 4. Finish Pass
+    gpuinfo_refresh_dynamic_info(&monitoredGpus);
+    gpuinfo_refresh_processes(&monitoredGpus);
+
+    // 5. Calculate Rates (Standard)
+    gpuinfo_utilisation_rate(&monitoredGpus);
+
+    // 6. MANUAL JSON OUTPUT
+    printf("[\n");
+
+    struct list_head *ptr;
+    int is_first = 1;
+    list_for_each(ptr, &monitoredGpus) {
+      struct gpu_info *device = list_entry(ptr, struct gpu_info, list);
+
+      if (!is_first) printf(",\n");
+      is_first = 0;
+
+      // --- Calculate True Usage (Summing Processes) ---
+      unsigned total_usage = 0;
+      for (unsigned i = 0; i < device->processes_count; ++i) {
+        if (GPUINFO_PROCESS_FIELD_VALID(&device->processes[i], gpu_usage)) {
+          total_usage += device->processes[i].gpu_usage;
+        }
+      }
+      if (total_usage > 100) total_usage = 100;
+
+      // --- Print JSON ---
+      printf("  {\n");
+      printf("   \"device_name\": \"%s\",\n", device->static_info.device_name);
+
+      // Clock
+      if (GPUINFO_DYNAMIC_FIELD_VALID(&device->dynamic_info, gpu_clock_speed))
+        printf("   \"gpu_clock\": \"%uMHz\",\n", device->dynamic_info.gpu_clock_speed);
+      else
+        printf("   \"gpu_clock\": null,\n");
+
+      // Temp
+      if (GPUINFO_DYNAMIC_FIELD_VALID(&device->dynamic_info, gpu_temp))
+        printf("   \"temp\": \"%uC\",\n", device->dynamic_info.gpu_temp);
+      else
+        printf("   \"temp\": null,\n");
+
+      // Fan
+      if (GPUINFO_DYNAMIC_FIELD_VALID(&device->dynamic_info, fan_rpm))
+        printf("   \"fan_speed\": \"%uRPM\",\n", device->dynamic_info.fan_rpm);
+      else
+        printf("   \"fan_speed\": null,\n");
+
+      // Power
+      if (GPUINFO_DYNAMIC_FIELD_VALID(&device->dynamic_info, power_draw))
+        // CHANGE THIS LINE BELOW: Add " / 1000"
+        printf("   \"power_draw\": \"%uW\",\n", device->dynamic_info.power_draw / 1000);
+      else
+        printf("   \"power_draw\": null,\n");
+
+      // GPU Util (THE FIXED VALUE)
+      printf("   \"gpu_util\": \"%u%%\",\n", total_usage);
+
+      // Mem Util
+      if (GPUINFO_DYNAMIC_FIELD_VALID(&device->dynamic_info, mem_util_rate))
+        printf("   \"mem_util\": \"%u%%\",\n", device->dynamic_info.mem_util_rate);
+      else
+        printf("   \"mem_util\": null,\n");
+
+      // Memory Details
+      if (GPUINFO_DYNAMIC_FIELD_VALID(&device->dynamic_info, total_memory)) {
+        printf("   \"mem_total\": \"%lu\",\n", device->dynamic_info.total_memory);
+        printf("   \"mem_used\": \"%lu\",\n", device->dynamic_info.used_memory);
+        printf("   \"mem_free\": \"%lu\"\n", device->dynamic_info.free_memory);
+      } else {
+        printf("   \"mem_total\": null\n");
+      }
+
+      printf("  }");
+    }
+    printf("\n]\n");
+
+    gpuinfo_shutdown_info_extraction(&monitoredGpus);
+    return EXIT_SUCCESS;
+  }
+  // ====================================================================================
+
   struct nvtop_interface *interface =
-      initialize_curses(allDevCount, numMonitoredGpus, interface_largest_gpu_name(&monitoredGpus), allDevicesOptions);
+  initialize_curses(allDevCount, numMonitoredGpus, interface_largest_gpu_name(&monitoredGpus), allDevicesOptions);
   timeout(interface_update_interval(interface));
 
   double time_slept = interface_update_interval(interface);
@@ -324,53 +404,52 @@ int main(int argc, char **argv) {
     nvtop_get_current_time(&time_after_sleep);
     time_slept += nvtop_difftime(time_before_sleep, time_after_sleep) * 1000;
     switch (input_char) {
-    case 27: // ESC
-    {
-      timeout(0);
-      int in = getch();
-      if (in == ERR) { // ESC alone
+      case 27: // ESC
+      {
+        timeout(0);
+        int in = getch();
+        if (in == ERR) { // ESC alone
+          if (is_escape_for_quit(interface))
+            signal_exit = 1;
+          else
+            interface_key(27, interface);
+        }
+      } break;
+      case KEY_F(10):
         if (is_escape_for_quit(interface))
           signal_exit = 1;
-        else
-          interface_key(27, interface);
-      }
-      // else ALT key
-    } break;
-    case KEY_F(10):
-      if (is_escape_for_quit(interface))
+      break;
+      case 'q':
         signal_exit = 1;
-      break;
-    case 'q':
-      signal_exit = 1;
-      break;
-    case KEY_RESIZE:
-      update_window_size_to_terminal_size(interface);
-      break;
-    case KEY_F(2):
-    case KEY_F(5):
-    case KEY_F(9):
-    case KEY_F(6):
-    case KEY_F(12):
-    case '+':
-    case '-':
-    case 12: // Ctrl+L
-      interface_key(input_char, interface);
-      break;
-    case 'k':
-    case KEY_UP:
-    case 'j':
-    case KEY_DOWN:
-    case 'h':
-    case KEY_LEFT:
-    case 'l':
-    case KEY_RIGHT:
-    case KEY_ENTER:
-    case '\n':
-      interface_key(input_char, interface);
-      break;
-    case ERR:
-    default:
-      break;
+        break;
+      case KEY_RESIZE:
+        update_window_size_to_terminal_size(interface);
+        break;
+      case KEY_F(2):
+      case KEY_F(5):
+      case KEY_F(9):
+      case KEY_F(6):
+      case KEY_F(12):
+      case '+':
+      case '-':
+      case 12: // Ctrl+L
+        interface_key(input_char, interface);
+        break;
+      case 'k':
+      case KEY_UP:
+      case 'j':
+      case KEY_DOWN:
+      case 'h':
+      case KEY_LEFT:
+      case 'l':
+      case KEY_RIGHT:
+      case KEY_ENTER:
+      case '\n':
+        interface_key(input_char, interface);
+        break;
+      case ERR:
+      default:
+        break;
     }
   }
 

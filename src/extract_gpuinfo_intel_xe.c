@@ -128,145 +128,132 @@ static const char *total_cycles_keys[] = {xe_drm_intel_total_cycles_rcs, xe_drm_
                                           xe_drm_intel_total_cycles_ccs};
 
 bool parse_drm_fdinfo_intel_xe(struct gpu_info *info, FILE *fdinfo_file, struct gpu_process *process_info) {
-  struct gpu_info_intel *gpu_info = container_of(info, struct gpu_info_intel, base);
-  static char *line = NULL;
-  static size_t line_buf_size = 0;
-  ssize_t count = 0;
+struct gpu_info_intel *gpu_info = container_of(info, struct gpu_info_intel, base);
+static char *line = NULL;
+static size_t line_buf_size = 0;
+ssize_t count = 0;
 
-  bool client_id_set = false;
-  unsigned cid;
-  nvtop_time current_time;
-  nvtop_get_current_time(&current_time);
+bool client_id_set = false;
+unsigned cid;
 
-  union intel_cycles gpu_cycles = {.array = {0}};
+union intel_cycles gpu_cycles = {.array = {0}};
+union intel_cycles total_cycles = {.array = {0}};
 
-  union intel_cycles total_cycles = {.array = {0}};
+// 1. Parse the file
+while ((count = getline(&line, &line_buf_size, fdinfo_file)) != -1) {
+  char *key, *val;
+  if (line[count - 1] == '\n') line[--count] = '\0';
+  if (!extract_drm_fdinfo_key_value(line, &key, &val)) continue;
 
-  while ((count = getline(&line, &line_buf_size, fdinfo_file)) != -1) {
-    char *key, *val;
-    // Get rid of the newline if present
-    if (line[count - 1] == '\n') {
-      line[--count] = '\0';
-    }
-
-    if (!extract_drm_fdinfo_key_value(line, &key, &val))
-      continue;
-
-    if (!strcmp(key, drm_pdev)) {
-      if (strcmp(val, gpu_info->base.pdev)) {
-        return false;
-      }
-    } else if (!strcmp(key, drm_client_id)) {
-      char *endptr;
-      cid = strtoul(val, &endptr, 10);
-      if (*endptr)
-        continue;
-      client_id_set = true;
-    } else {
-      if (!strcmp(key, xe_drm_intel_vram)) {
-        unsigned long mem_int;
-        char *endptr;
-
-        mem_int = strtoul(val, &endptr, 10);
-        if (endptr == val || (strcmp(endptr, " kB") && strcmp(endptr, " KiB")))
-          continue;
-
-        if GPUINFO_PROCESS_FIELD_VALID (process_info, gpu_memory_usage)
-          SET_GPUINFO_PROCESS(process_info, gpu_memory_usage, process_info->gpu_memory_usage + (mem_int * 1024));
-        else
-          SET_GPUINFO_PROCESS(process_info, gpu_memory_usage, mem_int * 1024);
-      } else {
-        unsigned long cycles;
-        char *endptr;
-
-        // Check for cycles
-        for (unsigned i = 0; i < ARRAY_SIZE(gpu_cycles.array); i++) {
-          if (!strcmp(key, cycles_keys[i])) {
-            cycles = strtoull(val, &endptr, 10);
-            gpu_cycles.array[i] = cycles;
-          }
-        }
-
-        // Check for total cycles
-        for (unsigned i = 0; i < ARRAY_SIZE(total_cycles_keys); i++) {
-          if (!strcmp(key, total_cycles_keys[i])) {
-            cycles = strtoull(val, &endptr, 10);
-            total_cycles.array[i] = cycles;
-          }
-        }
-      }
-    }
-  }
-
-  // Sum cycles for overall usage
-  {
-    uint64_t cycles_sum = 0;
-    for (unsigned i = 0; i < ARRAY_SIZE(gpu_cycles.array); i++) {
-      cycles_sum += gpu_cycles.array[i];
-    }
-    SET_GPUINFO_PROCESS(process_info, gpu_cycles, cycles_sum);
-  }
-
-  if (!client_id_set)
-    return false;
-
-  process_info->type = gpu_process_unknown;
-  if (gpu_cycles.rcs != 0)
-    process_info->type |= gpu_process_graphical;
-  if (gpu_cycles.ccs != 0)
-    process_info->type |= gpu_process_compute;
-
-  struct intel_process_info_cache *cache_entry;
-  struct unique_cache_id ucid = {.client_id = cid, .pid = process_info->pid, .pdev = gpu_info->base.pdev};
-  HASH_FIND_CLIENT(gpu_info->last_update_process_cache, &ucid, cache_entry);
-  if (cache_entry) {
-    HASH_DEL(gpu_info->last_update_process_cache, cache_entry);
-
-    // TODO: find how to extract global utilization
-    // gpu util will be computed as the sum of all the processes utilization for now
-    {
-      uint64_t cycles_delta = gpu_cycles.rcs - cache_entry->gpu_cycles.rcs;
-      uint64_t total_cycles_delta = total_cycles.rcs - cache_entry->total_cycles.rcs;
-      if (total_cycles_delta > 0)
-        SET_GPUINFO_PROCESS(process_info, gpu_usage, cycles_delta * 100 / total_cycles_delta);
-      else
-        SET_GPUINFO_PROCESS(process_info, gpu_usage, 0);
-    }
-    {
-      uint64_t cycles_delta = gpu_cycles.ccs - cache_entry->gpu_cycles.ccs;
-      uint64_t total_cycles_delta = total_cycles.ccs - cache_entry->total_cycles.ccs;
-      if (total_cycles_delta > 0)
-        SET_GPUINFO_PROCESS(process_info, gpu_usage, process_info->gpu_usage + cycles_delta * 100 / total_cycles_delta);
-    }
-    {
-      uint64_t cycles_delta = gpu_cycles.vcs - cache_entry->gpu_cycles.vcs;
-      uint64_t total_cycles_delta = total_cycles.vcs - cache_entry->total_cycles.vcs;
-      if (total_cycles_delta > 0)
-        SET_GPUINFO_PROCESS(process_info, decode_usage, cycles_delta * 100 / total_cycles_delta);
-    }
-
+  if (!strcmp(key, drm_pdev)) {
+    if (strcmp(val, gpu_info->base.pdev)) return false;
+  } else if (!strcmp(key, drm_client_id)) {
+    char *endptr;
+    cid = strtoul(val, &endptr, 10);
+    if (*endptr) continue;
+    client_id_set = true;
   } else {
-    cache_entry = calloc(1, sizeof(*cache_entry));
-    if (!cache_entry)
-      goto parse_fdinfo_exit;
-    cache_entry->client_id.client_id = cid;
-    cache_entry->client_id.pid = process_info->pid;
-    cache_entry->client_id.pdev = gpu_info->base.pdev;
+    if (!strcmp(key, xe_drm_intel_vram)) {
+      unsigned long mem_int = strtoul(val, NULL, 10);
+      if (GPUINFO_PROCESS_FIELD_VALID(process_info, gpu_memory_usage))
+        SET_GPUINFO_PROCESS(process_info, gpu_memory_usage, process_info->gpu_memory_usage + (mem_int * 1024));
+      else
+        SET_GPUINFO_PROCESS(process_info, gpu_memory_usage, mem_int * 1024);
+    } else {
+      // Capture cycles for all engines
+      for (unsigned i = 0; i < ARRAY_SIZE(gpu_cycles.array); i++) {
+        if (!strcmp(key, cycles_keys[i])) gpu_cycles.array[i] = strtoull(val, NULL, 10);
+      }
+      for (unsigned i = 0; i < ARRAY_SIZE(total_cycles_keys); i++) {
+        if (!strcmp(key, total_cycles_keys[i])) total_cycles.array[i] = strtoull(val, NULL, 10);
+      }
+    }
   }
+}
+
+// Sum cycles just for internal bookkeeping
+{
+  uint64_t cycles_sum = 0;
+  for (unsigned i = 0; i < ARRAY_SIZE(gpu_cycles.array); i++) cycles_sum += gpu_cycles.array[i];
+  SET_GPUINFO_PROCESS(process_info, gpu_cycles, cycles_sum);
+}
+
+if (!client_id_set) return false;
+
+// Set process type flags
+process_info->type = gpu_process_unknown;
+if (gpu_cycles.rcs != 0) process_info->type |= gpu_process_graphical;
+if (gpu_cycles.ccs != 0) process_info->type |= gpu_process_compute;
+
+struct intel_process_info_cache *cache_entry;
+struct unique_cache_id ucid = {.client_id = cid, .pid = process_info->pid, .pdev = gpu_info->base.pdev};
+HASH_FIND_CLIENT(gpu_info->last_update_process_cache, &ucid, cache_entry);
+
+if (cache_entry) {
+  HASH_DEL(gpu_info->last_update_process_cache, cache_entry);
+
+  // --- THE FIX STARTS HERE ---
+
+  // 1. Force GPU Usage to Valid 0% immediately.
+  // This ensures you never get "null" in JSON, even if the GPU is idle.
+  SET_GPUINFO_PROCESS(process_info, gpu_usage, 0);
+  SET_GPUINFO_PROCESS(process_info, decode_usage, 0);
+  SET_GPUINFO_PROCESS(process_info, encode_usage, 0);
+
+  // 2. Helper Macro to add usage safely
+  #define ADD_USAGE(engine_name, target_field) \
+  do { \
+    uint64_t d = gpu_cycles.engine_name - cache_entry->gpu_cycles.engine_name; \
+    uint64_t td = total_cycles.engine_name - cache_entry->total_cycles.engine_name; \
+    if (td > 0) { \
+      unsigned u = d * 100 / td; \
+      SET_GPUINFO_PROCESS(process_info, target_field, process_info->target_field + u); \
+    } \
+  } while(0)
+
+  // 3. Calculate Engines
+  // RCS = 3D Render
+  ADD_USAGE(rcs, gpu_usage);
+
+  // CCS = Compute (Frigate/AI)
+  ADD_USAGE(ccs, gpu_usage);
+
+  // VCS = Video Decode (Plex)
+  // NOTE: We add this to BOTH decode_usage (standard) AND gpu_usage (custom for you)
+  // This ensures Plex load shows up in the main "gpu_util" JSON field.
+  ADD_USAGE(vcs, decode_usage);
+  ADD_USAGE(vcs, gpu_usage);
+
+  // VECS = Video Encode (Plex)
+  ADD_USAGE(vecs, encode_usage);
+  ADD_USAGE(vecs, gpu_usage); // Add to main usage too
+
+  // BCS = Copy Engine (Moving data)
+  ADD_USAGE(bcs, gpu_usage);
+
+  #undef ADD_USAGE
+  // --- THE FIX ENDS HERE ---
+
+} else {
+  // New process: initialize cache
+  cache_entry = calloc(1, sizeof(*cache_entry));
+  if (!cache_entry) goto parse_fdinfo_exit;
+  cache_entry->client_id.client_id = cid;
+  cache_entry->client_id.pid = process_info->pid;
+  cache_entry->client_id.pdev = gpu_info->base.pdev;
+}
 
 #ifndef NDEBUG
-  // We should only process one fdinfo entry per client id per update
-  struct intel_process_info_cache *cache_entry_check;
-  HASH_FIND_CLIENT(gpu_info->current_update_process_cache, &cache_entry->client_id, cache_entry_check);
-  assert(!cache_entry_check && "We should not be processing a client id twice per update");
+struct intel_process_info_cache *cache_entry_check;
+HASH_FIND_CLIENT(gpu_info->current_update_process_cache, &cache_entry->client_id, cache_entry_check);
+assert(!cache_entry_check && "We should not be processing a client id twice per update");
 #endif
 
-  RESET_ALL(cache_entry->valid);
-  SET_INTEL_CACHE(cache_entry, gpu_cycles, gpu_cycles);
-  SET_INTEL_CACHE(cache_entry, total_cycles, total_cycles);
-
-  HASH_ADD_CLIENT(gpu_info->current_update_process_cache, cache_entry);
+RESET_ALL(cache_entry->valid);
+SET_INTEL_CACHE(cache_entry, gpu_cycles, gpu_cycles);
+SET_INTEL_CACHE(cache_entry, total_cycles, total_cycles);
+HASH_ADD_CLIENT(gpu_info->current_update_process_cache, cache_entry);
 
 parse_fdinfo_exit:
-  return true;
+return true;
 }
