@@ -1,6 +1,8 @@
 # Nvtop (Intel Battlemage / Xe Fix Fork)
 
-This is a fork of the excellent [Syllo/nvtop](https://github.com/Syllo/nvtop) project.
+
+**This was created using Gemini 3 Pro** and is a fork of the excellent [Syllo/nvtop](https://github.com/Syllo/nvtop) project.
+
 
 ## The Purpose of This Fork
 This fork addresses specific issues with **Intel Xe-based GPUs** (specifically the **Intel Arc B580 "Battlemage"**) when running in **Snapshot Mode** (`nvtop -s`).
